@@ -24,6 +24,8 @@ int main(int argc, char **argv) {
 
   int *array = malloc(array_size * sizeof(int));
   GenerateArray(array, array_size, seed);
+
+  printf("\n");
   struct MinMax min_max = GetMinMax(array, 0, array_size);
   free(array);
 

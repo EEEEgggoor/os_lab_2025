@@ -5,15 +5,34 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <getopt.h>
 
 #include "find_min_max.h"
 #include "utils.h"
+
+static bool parse_int(const char *str, int min_value, int *result) {
+  char *end;
+  errno = 0;
+
+  long value = strtol(str, &end, 10);
+
+  if (end == str || *end != '\0' || errno == ERANGE ||
+      value < min_value || value > INT_MAX) {
+    return false;
+  }
+
+  *result = (int)value;
+  return true;
+}
 
 int main(int argc, char **argv) {
   int seed = -1;
@@ -39,25 +58,33 @@ int main(int argc, char **argv) {
       case 0:
         switch (option_index) {
           case 0:
-            seed = atoi(optarg);
-            // your code here
-            // error handling
+            if (!parse_int(optarg, 0, &seed)) {
+              fprintf(stderr, "Ошибка: seed должен быть целым числом от 0 до %d\n",
+                      INT_MAX);
+              return 1;
+            }
             break;
+
           case 1:
-            array_size = atoi(optarg);
-            // your code here
-            // error handling
+            if (!parse_int(optarg, 1, &array_size)) {
+              fprintf(stderr, "Ошибка: array_size должен быть целым числом от 1 до %d\n",
+                      INT_MAX);
+              return 1;
+            }
             break;
+
           case 2:
-            pnum = atoi(optarg);
-            // your code here
-            // error handling
+            if (!parse_int(optarg, 1, &pnum)) {
+              fprintf(stderr, "Ошибка: pnum должен быть целым числом от 1 до %d\n",
+                      INT_MAX);
+              return 1;
+            }
             break;
           case 3:
             with_files = true;
             break;
 
-          defalut:
+          default:
             printf("Index %d is out of options\n", option_index);
         }
         break;
@@ -90,23 +117,53 @@ int main(int argc, char **argv) {
 
   struct timeval start_time;
   gettimeofday(&start_time, NULL);
+  int fd;
+  if(with_files){
+    fd = open("file_MIN_MAX.txt", O_RDWR | O_CREAT | O_APPEND | O_TRUNC, 0666);
+  }
+
+
+  int pipefds[pnum][2];
+
 
   for (int i = 0; i < pnum; i++) {
-    pid_t child_pid = fork();
-    if (child_pid >= 0) {
-      // successful fork
-      active_child_processes += 1;
-      if (child_pid == 0) {
-        // child process
 
-        // parallel somehow
+    if(pipe(pipefds[i]) == -1){
+      perror("fork");
+      exit(EXIT_FAILURE);
+    }
+
+    pid_t child_pid = fork();
+
+    int slice = array_size/pnum;
+
+    if (child_pid >= 0) {
+      if (child_pid == 0) {
+        int start = i * slice;
+        int end = (i == pnum - 1) ? array_size : (i + 1) * slice;
+        struct MinMax min_max = GetMinMax(array, start, end);
+
+        int in_file[2] = {min_max.min, min_max.max};
 
         if (with_files) {
-          // use files here
-        } else {
-          // use pipe here
+          write(fd, in_file, sizeof(in_file));
+        }
+        else {
+          close(pipefds[i][0]);
+          
+          write(pipefds[i][1], in_file, sizeof(in_file));
+
+          close(pipefds[i][1]);
+
         }
         return 0;
+      } else {
+        active_child_processes += 1;
+            
+        if (!with_files) {
+            close(pipefds[i][1]); 
+        }
+
       }
 
     } else {
@@ -116,8 +173,7 @@ int main(int argc, char **argv) {
   }
 
   while (active_child_processes > 0) {
-    // your code here
-
+    wait(NULL);
     active_child_processes -= 1;
   }
 
@@ -125,15 +181,29 @@ int main(int argc, char **argv) {
   min_max.min = INT_MAX;
   min_max.max = INT_MIN;
 
+  if (with_files) {
+    lseek(fd, 0, SEEK_SET);
+  }
+
   for (int i = 0; i < pnum; i++) {
     int min = INT_MAX;
     int max = INT_MIN;
 
+    int out_file[2];
+
     if (with_files) {
-      // read from files
+      read(fd, out_file, sizeof(out_file));
+
+      min = out_file[0];
+      max = out_file[1];
     } else {
-      // read from pipes
+      read(pipefds[i][0], out_file, sizeof(out_file));
+        
+      close(pipefds[i][0]);
     }
+
+    min = out_file[0];
+    max = out_file[1];
 
     if (min < min_max.min) min_max.min = min;
     if (max > min_max.max) min_max.max = max;
@@ -146,6 +216,7 @@ int main(int argc, char **argv) {
   elapsed_time += (finish_time.tv_usec - start_time.tv_usec) / 1000.0;
 
   free(array);
+  close(fd);
 
   printf("Min: %d\n", min_max.min);
   printf("Max: %d\n", min_max.max);
