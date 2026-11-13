@@ -20,7 +20,7 @@ struct Server {
   int port;
 };
 
-// задание для одного сервера + место для его ответа
+
 struct Task {
   struct Server server;
   uint64_t begin;
@@ -78,7 +78,7 @@ void *WorkWithServer(void *arg) {
 int main(int argc, char **argv) {
   uint64_t k = -1;
   uint64_t mod = -1;
-  char servers[255] = {'\0'}; // 255 - максимальная длина имени файла в Linux
+  char servers[255] = {'\0'};
 
   while (true) {
     static struct option options[] = {{"k", required_argument, 0, 0},
